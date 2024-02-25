@@ -5,11 +5,12 @@
 ![](https://img.shields.io/badge/version-0.9.0-orange)
 ![](https://img.shields.io/badge/Vapor-4.92.4-purple)
 ![](https://img.shields.io/badge/Yams-5.0.6-red)
+![](https://img.shields.io/badge/Commander-0.9.2-green)
 ![](https://img.shields.io/badge/Swift-5.9-blue)
 
 ## Installation
 
-To install Swiftsonver, you can run the following commands:
+To install Swiftsonver, run the following commands:
 
 ### For macOS :
 ```bash
@@ -41,7 +42,7 @@ resources:
 ```
 
 ## Usage
-After the editing the **swiftsonver.yml** file, you can run the following command to start the server:
+After editing the **swiftsonver.yml** file, run the following command to start the server:
 ```shell
 swiftsonver serve
 ```

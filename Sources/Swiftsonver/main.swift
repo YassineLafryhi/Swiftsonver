@@ -1,7 +1,6 @@
 import Commander
 import JWT
 import Logging
-import SwiftyJSON
 import Vapor
 import Yams
 
@@ -125,21 +124,11 @@ func loadDatabase(from: String) throws -> [String: Any] {
     return json
 }
 
-/*
  func saveDatabase(to: String, _ database: [String: Any]) throws {
  let fileURL = URL(fileURLWithPath: to)
  let data = try JSONSerialization.data(withJSONObject: database, options: [.prettyPrinted])
  try data.write(to: fileURL)
  }
- */
-
-func saveDatabase(to: String, _ database: [String: Any]) throws {
-    let fileURL = URL(fileURLWithPath: to)
-    let sortedDatabase = Dictionary(uniqueKeysWithValues: JSON(database).dictionaryValue.sorted { $0.0 < $1.0 })
-    let json = JSON(sortedDatabase)
-    let data = try json.rawData(options: [.prettyPrinted])
-    try data.write(to: fileURL)
-}
 
 struct EndpointConfig: Codable {
     var endpoints: [Endpoint]
@@ -152,7 +141,7 @@ struct Endpoint: Codable {
 }
 
 func watchFile(_ path: String, app: Application, appConfig: AppConfig) {
-    let fileURL = URL(fileURLWithPath: path)
+    /*let fileURL = URL(fileURLWithPath: path)
     let fileDescriptor = open(fileURL.path, O_EVTONLY)
     let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fileDescriptor, eventMask: .write, queue: DispatchQueue.global())
     source.setEventHandler {
@@ -165,7 +154,7 @@ func watchFile(_ path: String, app: Application, appConfig: AppConfig) {
             printInColors("Error loading database: \(error)", color: .red, style: .bold)
         }
     }
-    source.resume()
+    source.resume()*/
 }
 
 struct Payload: JWTPayload {
@@ -545,7 +534,7 @@ let initCommand = command {
 
     do {
         try sampleConfig.write(toFile: filePath, atomically: true, encoding: .utf8)
-        printInColors("swiftsonver.yml file has been created successfully.", style: .bold)
+        printInColors("swiftsonver.yml file has been created successfully.", color: .green, style: .bold)
     } catch {
         printInColors("Error creating swiftsonver.yml file: \(error)", color: .red, style: .bold)
     }

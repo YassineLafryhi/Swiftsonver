@@ -18,6 +18,7 @@ build_macos() {
 build_linux() {
     echo "Building for Linux..."
     swift build -c release
+    mv ./.build/release/Swiftsonver ./swiftsonver
 }
 
 OS=$(uname -s)
