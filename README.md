@@ -15,6 +15,7 @@ To install Swiftsonver, you can run the following commands:
 ```bash
 cd ~/Downloads
 wget https://github.com/YassineLafryhi/Swiftsonver/releases/download/0.9.0/Swiftsonver.zip
+unzip Swiftsonver.zip
 sudo mkdir -p /usr/local/bin
 sudo mv swiftsonver /usr/local/bin/swiftsonver
 sudo chmod +x /usr/local/bin/swiftsonver
