@@ -124,11 +124,11 @@ func loadDatabase(from: String) throws -> [String: Any] {
     return json
 }
 
- func saveDatabase(to: String, _ database: [String: Any]) throws {
- let fileURL = URL(fileURLWithPath: to)
- let data = try JSONSerialization.data(withJSONObject: database, options: [.prettyPrinted])
- try data.write(to: fileURL)
- }
+func saveDatabase(to: String, _ database: [String: Any]) throws {
+    let fileURL = URL(fileURLWithPath: to)
+    let data = try JSONSerialization.data(withJSONObject: database, options: [.prettyPrinted])
+    try data.write(to: fileURL)
+}
 
 struct EndpointConfig: Codable {
     var endpoints: [Endpoint]
@@ -140,21 +140,21 @@ struct Endpoint: Codable {
     var response: String
 }
 
-func watchFile(_ path: String, app: Application, appConfig: AppConfig) {
-    /*let fileURL = URL(fileURLWithPath: path)
-    let fileDescriptor = open(fileURL.path, O_EVTONLY)
-    let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fileDescriptor, eventMask: .write, queue: DispatchQueue.global())
-    source.setEventHandler {
-        // print("File changed: \(path)")
-        do {
-            let json = try loadDatabase(from: path)
-            let resources = json["resources"] as? [[String: Any]]
-            try routes(app, with: resources, jsonDatabasePath: path, appConfig: appConfig)
-        } catch {
-            printInColors("Error loading database: \(error)", color: .red, style: .bold)
-        }
-    }
-    source.resume()*/
+func watchFile(_: String, app _: Application, appConfig _: AppConfig) {
+    /* let fileURL = URL(fileURLWithPath: path)
+     let fileDescriptor = open(fileURL.path, O_EVTONLY)
+     let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fileDescriptor, eventMask: .write, queue: DispatchQueue.global())
+     source.setEventHandler {
+         // print("File changed: \(path)")
+         do {
+             let json = try loadDatabase(from: path)
+             let resources = json["resources"] as? [[String: Any]]
+             try routes(app, with: resources, jsonDatabasePath: path, appConfig: appConfig)
+         } catch {
+             printInColors("Error loading database: \(error)", color: .red, style: .bold)
+         }
+     }
+     source.resume() */
 }
 
 struct Payload: JWTPayload {
@@ -427,6 +427,37 @@ func routes(_ app: Application, with: [[String: Any]]?, jsonDatabasePath: String
                                 return Response(status: .ok)
                             } else {
                                 throw Abort(.internalServerError, reason: "Resource not found")
+                            }
+                        } else {
+                            throw Abort(.internalServerError, reason: "Resources format is incorrect")
+                        }
+                    }
+
+                    api.delete("\(name)") { req -> Response in
+                        if appConfig.requiresAuthorization {
+                            let hasValidJWTToken = try req.hasValidJWTToken()
+                            if !hasValidJWTToken {
+                                throw Abort(.unauthorized)
+                            }
+                        }
+
+                        var database = try loadDatabase(from: jsonDatabasePath)
+                        if var resources = database["resources"] as? [[String: Any]] {
+                            var updatedResources = false
+                            for (index, resource) in resources.enumerated() {
+                                if let targetResource = resource["resource"] as? String, targetResource == name {
+                                    resources[index]["items"] = []
+                                    updatedResources = true
+                                    break
+                                }
+                            }
+
+                            if updatedResources {
+                                database["resources"] = resources
+                                try saveDatabase(to: jsonDatabasePath, database)
+                                return Response(status: .ok)
+                            } else {
+                                throw Abort(.notFound, reason: "Resource name not found")
                             }
                         } else {
                             throw Abort(.internalServerError, reason: "Resources format is incorrect")
