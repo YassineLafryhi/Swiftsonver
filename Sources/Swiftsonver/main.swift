@@ -35,7 +35,8 @@ func doesTerminalSupportANSIColors() -> Bool {
 
 func printInColors(_ message: String, color: ANSIColor = .blue, style: TextStyle = .bold) {
     if doesTerminalSupportANSIColors() { _ = style == .bold ? ";1m" : "m"
-        let coloredMessage = "\(color.rawValue)\(style == .bold ? color.rawValue.replacingOccurrences(of: "[0;", with: "[1;") : color.rawValue)\(message)\(ANSIColor.reset.rawValue)"
+        let coloredMessage =
+            "\(color.rawValue)\(style == .bold ? color.rawValue.replacingOccurrences(of: "[0;", with: "[1;") : color.rawValue)\(message)\(ANSIColor.reset.rawValue)"
         print(coloredMessage)
     } else {
         print(message)
@@ -43,15 +44,17 @@ func printInColors(_ message: String, color: ANSIColor = .blue, style: TextStyle
 }
 
 struct AppConfig: Codable {
+    var hostname: String
+    var port: Int
     var apiVersion: String
     var jsonDatabaseName: String
-    var publicFolderName: String
-    var uploadsFolderName: String
+    var publicFolderName: String?
+    var uploadsFolderName: String?
     var requiresAuthorization: Bool
-    var jwtSecret: String
-    var jwtExpirationTime: Int
-    var adminUsername: String
-    var adminPassword: String
+    var jwtSecret: String?
+    var jwtExpirationTime: Int?
+    var adminUsername: String?
+    var adminPassword: String?
     var resources: [Resource]
 }
 
@@ -78,22 +81,26 @@ func loadAppConfig() throws -> AppConfig? {
         try createJSONDatabase(config: config, path: jsonDatabasePath)
     }
 
-    let publicFolderPath = "\(currentPath)/\(config.publicFolderName)"
-    let uploadsFolderPath = "\(currentPath)/\(config.uploadsFolderName)"
+    if let publicFolderName = config.publicFolderName {
+        let publicFolderPath = "\(currentPath)/\(publicFolderName)"
 
-    if !FileManager.default.fileExists(atPath: publicFolderPath) {
-        do {
-            try FileManager.default.createDirectory(atPath: publicFolderPath, withIntermediateDirectories: true)
-        } catch {
-            print("Error creating \(config.publicFolderName) folder: \(error)")
+        if !FileManager.default.fileExists(atPath: publicFolderPath) {
+            do {
+                try FileManager.default.createDirectory(atPath: publicFolderPath, withIntermediateDirectories: true)
+            } catch {
+                print("Error creating \(publicFolderName) folder: \(error)")
+            }
         }
     }
 
-    if !FileManager.default.fileExists(atPath: uploadsFolderPath) {
-        do {
-            try FileManager.default.createDirectory(atPath: uploadsFolderPath, withIntermediateDirectories: true)
-        } catch {
-            print("Error creating \(config.uploadsFolderName) folder: \(error)")
+    if let uploadsFolderName = config.uploadsFolderName {
+        let uploadsFolderPath = "\(currentPath)/\(uploadsFolderName)"
+        if !FileManager.default.fileExists(atPath: uploadsFolderPath) {
+            do {
+                try FileManager.default.createDirectory(atPath: uploadsFolderPath, withIntermediateDirectories: true)
+            } catch {
+                print("Error creating \(uploadsFolderName) folder: \(error)")
+            }
         }
     }
 
@@ -101,15 +108,27 @@ func loadAppConfig() throws -> AppConfig? {
 }
 
 func createJSONDatabase(config: AppConfig, path: String) throws {
-    let database: [String: Any] = try [
-        "resources": config.resources.map { ["resource": $0.name, "items": []] },
-        "users": [
-            [
-                "username": config.adminUsername,
-                "password": Bcrypt.hash(config.adminPassword),
-            ],
-        ],
-    ]
+    let database: [String: Any]
+
+    if
+        config.requiresAuthorization,
+        let adminUsername = config.adminUsername,
+        let adminPassword = config.adminPassword
+    {
+        database = try [
+            "resources": config.resources.map { ["resource": $0.name, "items": []] },
+            "users": [
+                [
+                    "username": adminUsername,
+                    "password": Bcrypt.hash(adminPassword)
+                ]
+            ]
+        ]
+    } else {
+        database = [
+            "resources": config.resources.map { ["resource": $0.name, "items": []] }
+        ]
+    }
 
     let data = try JSONSerialization.data(withJSONObject: database, options: [.prettyPrinted])
     FileManager.default.createFile(atPath: path, contents: data, attributes: nil)
@@ -173,35 +192,44 @@ struct Payload: JWTPayload {
 }
 
 func routes(_ app: Application, with: [[String: Any]]?, jsonDatabasePath: String, appConfig: AppConfig) throws {
-    app.post("login") { req -> Response in
-        let body = try req.content.decode([String: String].self)
-        let username = body["username"]!
-        let password = body["password"]!
-        let database = try loadDatabase(from: jsonDatabasePath)
-        if let users = database["users"] as? [[String: String]] {
-            let user = users.first(where: { $0["username"] == username })
-            if user == nil {
-                throw Abort(.unauthorized, reason: "Invalid username or password")
-            }
-            if let hashedPassword = user?["password"] {
-                if try Bcrypt.verify(password, created: hashedPassword) {
-                    let expirationTime = Date().addingTimeInterval(TimeInterval(appConfig.jwtExpirationTime))
-                    let payload = Payload(
-                        subject: "Swiftsonver",
-                        expiration: .init(value: expirationTime),
-                        isAdmin: true
-                    )
-                    let response = try ["token": req.jwt.sign(payload)]
-                    let data = try JSONSerialization.data(withJSONObject: response, options: [])
-                    return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: data))
+    if
+        appConfig.requiresAuthorization,
+        let adminUsername = appConfig.adminUsername,
+        let adminPassword = appConfig.adminPassword,
+        let jwtExpirationTime = appConfig.jwtExpirationTime
+    {
+        app.post("login") { req -> Response in
+            let body = try req.content.decode([String: String].self)
+            let username = body["username"]!
+            let password = body["password"]!
+            let database = try loadDatabase(from: jsonDatabasePath)
+            if let users = database["users"] as? [[String: String]] {
+                let user = users.first(where: { $0["username"] == username })
+                if user == nil {
+                    throw Abort(.unauthorized, reason: "Invalid username or password")
+                }
+                if let hashedPassword = user?["password"] {
+                    if try Bcrypt.verify(password, created: hashedPassword) {
+                        let expirationTime = Date().addingTimeInterval(TimeInterval(jwtExpirationTime))
+                        let payload = Payload(
+                            subject: "Swiftsonver",
+                            expiration: .init(value: expirationTime),
+                            isAdmin: true)
+                        let response = try ["token": req.jwt.sign(payload)]
+                        let data = try JSONSerialization.data(withJSONObject: response, options: [])
+                        return Response(
+                            status: .ok,
+                            headers: ["Content-Type": "application/json"],
+                            body: Response.Body(data: data))
+                    } else {
+                        throw Abort(.unauthorized, reason: "Invalid username or password")
+                    }
                 } else {
                     throw Abort(.unauthorized, reason: "Invalid username or password")
                 }
             } else {
-                throw Abort(.unauthorized, reason: "Invalid username or password")
+                throw Abort(.internalServerError, reason: "Users format is incorrect")
             }
-        } else {
-            throw Abort(.internalServerError, reason: "Users format is incorrect")
         }
     }
 
@@ -223,24 +251,26 @@ func routes(_ app: Application, with: [[String: Any]]?, jsonDatabasePath: String
         }
     }
 
-    app.post("upload") { req -> EventLoopFuture<HTTPStatus> in
-        let uploadDirectory = "\(appConfig.uploadsFolderName)/"
-        let directory = req.application.directory.workingDirectory + uploadDirectory
-        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        let file = req.body.data
-        // TODO: Add file extension
-        let filename = "\(UUID().uuidString)"
-        return req.fileio.writeFile(file!, at: "\(directory)\(filename)").map {
-            .ok
+    if let uploadsFolderName = appConfig.uploadsFolderName {
+        app.post("upload") { req -> EventLoopFuture<HTTPStatus> in
+            let uploadDirectory = "\(uploadsFolderName)/"
+            let directory = req.application.directory.workingDirectory + uploadDirectory
+            try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+            let file = req.body.data
+            // TODO: Add file extension
+            let filename = "\(UUID().uuidString)"
+            return req.fileio.writeFile(file!, at: "\(directory)\(filename)").map {
+                .ok
+            }
         }
-    }
 
-    app.get("files", ":filename") { req -> Response in
-        let filename = req.parameters.get("filename")!
-        let uploadDirectory = "\(appConfig.uploadsFolderName)"
-        let directory = req.application.directory.workingDirectory + uploadDirectory
-        let path = "\(directory)/\(filename)"
-        return req.fileio.streamFile(at: path)
+        app.get("files", ":filename") { req -> Response in
+            let filename = req.parameters.get("filename")!
+            let uploadDirectory = "\(uploadsFolderName)"
+            let directory = req.application.directory.workingDirectory + uploadDirectory
+            let path = "\(directory)/\(filename)"
+            return req.fileio.streamFile(at: path)
+        }
     }
 
     app.group("api", "\(appConfig.apiVersion)") { api in
@@ -259,26 +289,41 @@ func routes(_ app: Application, with: [[String: Any]]?, jsonDatabasePath: String
                             let json = try loadDatabase(from: jsonDatabasePath)
                             guard let resources = json["resources"] as? [[String: Any]] else {
                                 let error = "{\"error\": \"Error: Unable to find resources.\"".data(using: .utf8)
-                                return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: error!))
+                                return Response(
+                                    status: .ok,
+                                    headers: ["Content-Type": "application/json"],
+                                    body: Response.Body(data: error!))
                             }
 
                             if let index = resources.firstIndex(where: { $0["resource"] as? String == name }) {
                                 let resource = resources[index]
                                 if let jsonResponse = resource["items"] as? [[String: Any]] {
                                     let data = try JSONSerialization.data(withJSONObject: jsonResponse, options: [])
-                                    return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: data))
+                                    return Response(
+                                        status: .ok,
+                                        headers: ["Content-Type": "application/json"],
+                                        body: Response.Body(data: data))
 
                                 } else {
                                     let error = "{\"error\": \"Error: Items not found for resource.\"".data(using: .utf8)
-                                    return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: error!))
+                                    return Response(
+                                        status: .ok,
+                                        headers: ["Content-Type": "application/json"],
+                                        body: Response.Body(data: error!))
                                 }
                             } else {
                                 let error = "{\"error\": \"Error: Resource not found.\"".data(using: .utf8)
-                                return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: error!))
+                                return Response(
+                                    status: .ok,
+                                    headers: ["Content-Type": "application/json"],
+                                    body: Response.Body(data: error!))
                             }
                         } catch {
                             let error = "{\"error\": \"Error: \(error.localizedDescription)\"".data(using: .utf8)
-                            return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: error!))
+                            return Response(
+                                status: .ok,
+                                headers: ["Content-Type": "application/json"],
+                                body: Response.Body(data: error!))
                         }
                     }
 
@@ -294,7 +339,10 @@ func routes(_ app: Application, with: [[String: Any]]?, jsonDatabasePath: String
                             let json = try loadDatabase(from: jsonDatabasePath)
                             guard let resources = json["resources"] as? [[String: Any]] else {
                                 let error = "{\"error\": \"Error: Unable to find resources.\"".data(using: .utf8)
-                                return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: error!))
+                                return Response(
+                                    status: .ok,
+                                    headers: ["Content-Type": "application/json"],
+                                    body: Response.Body(data: error!))
                             }
 
                             if let index = resources.firstIndex(where: { $0["resource"] as? String == name }) {
@@ -303,22 +351,37 @@ func routes(_ app: Application, with: [[String: Any]]?, jsonDatabasePath: String
                                     let id = req.parameters.get("id")!
                                     if let item = items.first(where: { $0["id"] as? String == id }) {
                                         let data = try JSONSerialization.data(withJSONObject: item, options: [])
-                                        return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: data))
+                                        return Response(
+                                            status: .ok,
+                                            headers: ["Content-Type": "application/json"],
+                                            body: Response.Body(data: data))
                                     } else {
                                         let error = "{\"error\": \"Error: Item not found.\"".data(using: .utf8)
-                                        return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: error!))
+                                        return Response(
+                                            status: .ok,
+                                            headers: ["Content-Type": "application/json"],
+                                            body: Response.Body(data: error!))
                                     }
                                 } else {
                                     let error = "{\"error\": \"Error: Items not found for resource.\"".data(using: .utf8)
-                                    return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: error!))
+                                    return Response(
+                                        status: .ok,
+                                        headers: ["Content-Type": "application/json"],
+                                        body: Response.Body(data: error!))
                                 }
                             } else {
                                 let error = "{\"error\": \"Error: Resource not found.\"".data(using: .utf8)
-                                return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: error!))
+                                return Response(
+                                    status: .ok,
+                                    headers: ["Content-Type": "application/json"],
+                                    body: Response.Body(data: error!))
                             }
                         } catch {
                             let error = "{\"error\": \"Error: \(error.localizedDescription)\"".data(using: .utf8)
-                            return Response(status: .ok, headers: ["Content-Type": "application/json"], body: Response.Body(data: error!))
+                            return Response(
+                                status: .ok,
+                                headers: ["Content-Type": "application/json"],
+                                body: Response.Body(data: error!))
                         }
                     }
 
@@ -534,8 +597,15 @@ let serveCommand = command {
     let resources = json["resources"] as? [[String: Any]]
 
     let app = Application(env)
-    app.jwt.signers.use(.hs256(key: appConfig!.jwtSecret))
-    app.middleware.use(FileMiddleware(publicDirectory: "\(currentPath)/\(appConfig!.publicFolderName)"))
+    app.http.server.configuration.hostname = appConfig?.hostname ?? "0.0.0.0"
+    app.http.server.configuration.port = appConfig?.port ?? 8_080
+    if let jwtSecret = appConfig?.jwtSecret {
+        app.jwt.signers.use(.hs256(key: jwtSecret))
+    }
+
+    if let publicFolderName = appConfig?.publicFolderName {
+        app.middleware.use(FileMiddleware(publicDirectory: "\(currentPath)/\(publicFolderName)"))
+    }
     app.middleware.use(CORSMiddleware())
 
     watchFile(jsonDatabasePath, app: app, appConfig: appConfig!)
@@ -547,18 +617,21 @@ let serveCommand = command {
 
 let initCommand = command {
     let sampleConfig = """
-    apiVersion: "v1"
-    jsonDatabaseName: "database.json"
-    publicFolderName: "public"
-    uploadsFolderName: "uploads"
-    requiresAuthorization: true
-    jwtSecret: "MY_JWT_SECRET"
-    jwtExpirationTime: 300 # 5 minutes
-    adminUsername: "admin"
-    adminPassword: "password"
-    resources:
-      - name: "posts"
-    """
+        hostname: "0.0.0.0"
+        port: 8080
+        apiVersion: "v1"
+        jsonDatabaseName: "database.json"
+        publicFolderName: "public"
+        uploadsFolderName: "uploads"
+        requiresAuthorization: true
+        jwtSecret: "MY_JWT_SECRET"
+        jwtExpirationTime: 300 # 5 minutes
+        adminUsername: "admin"
+        adminPassword: "password"
+        resources:
+          - name: "posts"
+          - name: "comments"
+        """
 
     let currentPath = FileManager.default.currentDirectoryPath
     let filePath = "\(currentPath)/swiftsonver.yml"

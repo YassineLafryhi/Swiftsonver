@@ -1,0 +1,24 @@
+# Languages to check
+languages:
+  - en
+
+# Regular expressions to exclude
+excludePatterns:
+  - \b[0-9a-fA-F]{6}\b
+  - \bhttps?:\/\/[^\s]+\b
+  - ^[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+){2,}$
+
+# Files to exclude
+excludeFiles:
+  - Package.swift
+
+# Directories to exclude
+excludeDirectories:
+  - Build
+
+# Words to ignore
+ignoreList:
+  - Swiftsonver
+  - jwt
+  - swiftsonver.yml
+  - vt100
